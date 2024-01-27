@@ -12,26 +12,24 @@ let storage = multer.diskStorage({
 
         cb(null, uniqueName);
     }
-})
+});
 
 let upload = multer({
     storage: storage,
     limits: { fileSize: 1000000 * 100 },
 }).single('myfile');
 
-
 router.post('/', (req, res) => {
-
-    //store file
+    // store file
     upload(req, res, async (err) => {
-        //validate request
+        // validate request
         if (!req.file) {
             return res.json({ error: 'All fields are required.' });
         }
 
         if (err) { return res.status(500).send({ error: err.message }); }
 
-        //store into database
+        // store into the database
         const file = new File({
             filename: req.file.filename,
             uuid: uuid4(),
@@ -41,10 +39,42 @@ router.post('/', (req, res) => {
 
         const response = await file.save();
         return res.json({ file: `${process.env.APP_BASE_URL}/files/${response.uuid}` });
-    })
+    });
+});
 
+router.post("/send", async (req, res) => {
+    const { uuid, emailTo, emailFrom } = req.body;
+    // validate request 
+    if (!uuid || !emailTo || !emailFrom) {
+        return res.status(422).send({ error: "All fields are required" });
+    }
 
-    //response --> link
+    // get data from the database
+    const file = await File.findOne({ uuid: uuid });
+    if (file.sender) {
+        return res.status(422).send({ error: "Email already sent." });
+    }
+
+    file.sender = emailFrom;
+    file.receiver = emailTo;
+    const response = await file.save();
+
+    // send email
+    const sendMail = require("../services/emailService");
+    sendMail({
+        from: emailFrom,
+        to: emailTo,
+        subject: "Deadpool's file sharer",
+        text: `${emailFrom} shared a file with you`,
+        html: require("../services/emailTemplate")({
+            emailFrom: emailFrom,
+            downloadLink: `${process.env.APP_BASE_URL}/files/${file.uuid}`, // Fix the typo here
+            size: parseInt(file.size / 1000) + 'KB',
+            expires: '24 hours'
+        })
+    });
+
+    return res.send({ success: true });
 });
 
 module.exports = router;
